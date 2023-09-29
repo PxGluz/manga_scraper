@@ -4,10 +4,11 @@ import bs4
 import requests
 import time
 from PIL import Image
+from tqdm import tqdm
 
 # Modify these three variables to your liking
-folder_name = "Berserk"  # Name of the folder you would like the pdfs to be saved in
-base_url = "https://chapmanganato.com/manga-ma952557/chapter-0.3"  # Put first chapter here from manga site (default works only for Manganato)
+folder_name = "Kakegurui"  # Name of the folder you would like the pdfs to be saved in
+base_url = "https://chapmanganato.com/manga-pi952917/chapter-1"  # Put first chapter here from manga site (default works only for Manganato)
 delay_between_requests = 0  # Delay in seconds between each image download to avoid time out
 
 headers_list = [
@@ -41,7 +42,6 @@ if __name__ == '__main__':
 
     # Iterates through all the chapters until there are no more chapters
     while current_page is not None:
-        print(f"Started chapter {iteration}!")
         html = session.get(current_page, headers=random.choice(headers_list), allow_redirects=False)
         # Get html of current page
         soup = bs4.BeautifulSoup(html.text, 'html.parser')
@@ -51,8 +51,8 @@ if __name__ == '__main__':
         image_links = [x['src'] for x in reader_container.findChildren("img")]
 
         # Here we iterate through all the images of the current chapter
-        for i, link in enumerate(image_links):
-            image_url = link
+        for i in tqdm(range(len(image_links)), desc=f"Downloading chapter {iteration}!"):
+            image_url = image_links[i]
             file_name = f"{folder_name}/image_{i + 1}.jpg"
 
             # We update the headers to create a reference to the current chapter page
@@ -62,7 +62,6 @@ if __name__ == '__main__':
             with session.get(image_url, headers=headers) as response:
                 with open(file_name, "wb") as f:
                     f.write(response.content)
-                    print(f"Image {i + 1}, time : {response.elapsed.total_seconds()}")  # Times may be long due to downloads and timeouts
 
             # We add it to the current image list and initialize the first image if it is not already
             if pdf is None:
