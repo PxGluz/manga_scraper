@@ -7,8 +7,6 @@ from PIL import Image
 from tqdm import tqdm
 
 # Modify these three variables to your liking
-folder_name = "Kakegurui"  # Name of the folder you would like the pdfs to be saved in
-base_url = "https://chapmanganato.com/manga-pi952917/chapter-1"  # Put first chapter here from manga site (default works only for Manganato)
 delay_between_requests = 0  # Delay in seconds between each image download to avoid time out
 
 headers_list = [
@@ -23,16 +21,18 @@ headers_list = [
     },
 ]
 
-if __name__ == '__main__':
+session = None
+
+
+def download_chapters(base_url, manga_name, batch_size=1):
     # Inits
     pdf = None
     current_page = base_url
     pdf_pages = []
-    session = requests.Session()
 
     # Creates the dir for the pdfs
-    os.makedirs(folder_name, exist_ok=True)
-    dir_path = f"{folder_name}/"
+    os.makedirs(manga_name, exist_ok=True)
+    dir_path = f"{manga_name}/"
     starting_chapter = 0
     for path in os.listdir(dir_path):
         if os.path.isfile(os.path.join(dir_path, path)):
@@ -53,7 +53,7 @@ if __name__ == '__main__':
             # Here we iterate through all the images of the current chapter
             for i in tqdm(range(len(image_links)), desc=f"Downloading chapter {iteration + 1}!"):
                 image_url = image_links[i]
-                file_name = f"{folder_name}/image_{i + 1}.jpg"
+                file_name = f"{manga_name}/image_{i + 1}.jpg"
 
                 # We update the headers to create a reference to the current chapter page
                 headers = random.choice(headers_list)
@@ -72,7 +72,7 @@ if __name__ == '__main__':
                 # We remove the current image from the pc as it is already stocked in the memory and sleep if we need to
                 os.remove(file_name)
                 time.sleep(delay_between_requests)
-            pdf.save(f'{folder_name}/chapter_{iteration + 1}.pdf', save_all=True, append_images=pdf_pages)
+            pdf.save(f'{manga_name}/chapter_{iteration + 1}.pdf', save_all=True, append_images=pdf_pages)
         else:
             print(f"Skipping chapter {iteration + 1}, it already exists!")
 
@@ -91,3 +91,42 @@ if __name__ == '__main__':
     print(f"Finished creating {iteration - starting_chapter + 1} chapter pdfs!")
 
 
+if __name__ == '__main__':
+    session = requests.Session()
+    const_link = "https://manganato.com/search/story/"
+
+    while True:
+        search_name = input("Please input the name of the manga you want downloaded: ")
+        html_page = session.get(const_link + search_name.lower(), headers=random.choice(headers_list), allow_redirects=False)
+        search_soup = bs4.BeautifulSoup(html_page.text, 'html.parser')
+        search_results = search_soup.find("div", {"class": "panel-search-story"})
+        if search_results is not None:
+            five_elements = search_results.findChildren("a", {"class": "item-img bookmark_check"})[:5]
+            five_links = [x['href'] for x in five_elements]
+            five_titles = [x['title'] for x in five_elements]
+
+            while True:
+                print("\n0. Return to searching\n")
+                for i in range(len(five_titles)):
+                    print(f"{i + 1}. {five_titles[i]}")
+                choice = int(input("Choose one of the results: "))
+                if choice < 0 or choice > len(five_titles):
+                    print("\nInvalid input!\n")
+                else:
+                    if choice != 0:
+                        chapters_html = session.get(five_links[choice - 1], headers=random.choice(headers_list),
+                                                    allow_redirects=False)
+                        chapters_soup = bs4.BeautifulSoup(chapters_html.text, 'html.parser')
+                        chapter_list = chapters_soup.find("ul", {"class": "row-content-chapter"})
+                        if chapter_list is not None:
+                            first_chapter_link = \
+                            chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})[-1]["href"]
+                            download_chapters(first_chapter_link, five_titles[choice - 1])
+                        else:
+                            print("\nManga has no chapters... Returning to search")
+                            choice = 0
+                    break
+            if choice != 0:
+                break
+        else:
+            print("\nNo results... Returning to search")
