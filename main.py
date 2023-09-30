@@ -5,10 +5,25 @@ import requests
 import time
 from PIL import Image
 from tqdm import tqdm
+import argparse
+import atexit
+
+
+def exit_handler(folder_name):
+    print('Forced exit!')
+    all_files = os.listdir(f"{folder_name}/")
+
+    for item in all_files:
+        if item.endswith(".jpg"):
+            os.remove(os.path.join(folder_name, item))
+
 
 # Modify these three variables to your liking
 delay_between_requests = 0  # Delay in seconds between each image download to avoid time out
 
+# These should not be modified
+pdf = None
+session = None
 headers_list = [
     {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
@@ -21,10 +36,8 @@ headers_list = [
     },
 ]
 
-session = None
 
-
-def download_chapters(base_url, manga_name, batch_size=1):
+def download_chapters(base_url, manga_name):
     # Inits
     pdf = None
     current_page = base_url
@@ -92,8 +105,16 @@ def download_chapters(base_url, manga_name, batch_size=1):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+                    prog='MangaScraper',
+                    description='Download pdf mangas from manganato.com',
+                    epilog='Program made by PxGluz')
+    parser.add_argument('-s', '-search-size', default=5, type=int, dest="search_size", help="how many results should be shown when searching")
+    args = parser.parse_args()
+
     session = requests.Session()
     const_link = "https://manganato.com/search/story/"
+    search_size = args.search_size
 
     while True:
         search_name = input("Please input the name of the manga you want downloaded: ")
@@ -101,27 +122,27 @@ if __name__ == '__main__':
         search_soup = bs4.BeautifulSoup(html_page.text, 'html.parser')
         search_results = search_soup.find("div", {"class": "panel-search-story"})
         if search_results is not None:
-            five_elements = search_results.findChildren("a", {"class": "item-img bookmark_check"})[:5]
-            five_links = [x['href'] for x in five_elements]
-            five_titles = [x['title'] for x in five_elements]
+            elements = search_results.findChildren("a", {"class": "item-img bookmark_check"})[:search_size]
+            links = [x['href'] for x in elements]
+            titles = [x['title'] for x in elements]
 
             while True:
                 print("\n0. Return to searching\n")
-                for i in range(len(five_titles)):
-                    print(f"{i + 1}. {five_titles[i]}")
+                for i in range(len(titles)):
+                    print(f"{i + 1}. {titles[i]}")
                 choice = int(input("Choose one of the results: "))
-                if choice < 0 or choice > len(five_titles):
+                if choice < 0 or choice > len(titles):
                     print("\nInvalid input!\n")
                 else:
                     if choice != 0:
-                        chapters_html = session.get(five_links[choice - 1], headers=random.choice(headers_list),
+                        chapters_html = session.get(links[choice - 1], headers=random.choice(headers_list),
                                                     allow_redirects=False)
                         chapters_soup = bs4.BeautifulSoup(chapters_html.text, 'html.parser')
                         chapter_list = chapters_soup.find("ul", {"class": "row-content-chapter"})
                         if chapter_list is not None:
-                            first_chapter_link = \
-                            chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})[-1]["href"]
-                            download_chapters(first_chapter_link, five_titles[choice - 1])
+                            first_chapter_link = chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})[-1]["href"]
+                            atexit.register(exit_handler, titles[choice - 1])
+                            download_chapters(first_chapter_link, titles[choice - 1])
                         else:
                             print("\nManga has no chapters... Returning to search")
                             choice = 0
