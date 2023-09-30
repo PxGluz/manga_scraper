@@ -117,7 +117,7 @@ if __name__ == '__main__':
     search_size = args.search_size
 
     while True:
-        search_name = input("Please input the name of the manga you want downloaded: ")
+        search_name = input("Please input the name of the manga you want downloaded: ").replace(' ', '_')
         html_page = session.get(const_link + search_name.lower(), headers=random.choice(headers_list), allow_redirects=False)
         search_soup = bs4.BeautifulSoup(html_page.text, 'html.parser')
         search_results = search_soup.find("div", {"class": "panel-search-story"})
