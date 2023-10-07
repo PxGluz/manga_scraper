@@ -7,23 +7,29 @@ from PIL import Image
 from tqdm import tqdm
 import argparse
 import atexit
+import json
 
 
-def exit_handler(folder_name):
-    print('Forced exit!')
+def exit_handler(folder_name, pdf_var, pdf_pages, offset, last_chapter, current_pdfs):
     all_files = os.listdir(f"{folder_name}/")
-
     for item in all_files:
         if item.endswith(".jpg"):
             os.remove(os.path.join(folder_name, item))
+    current_pdfs += 1
+    pdf_var.save(f'{folder_name}/Batch_{current_pdfs}-{(last_chapter - offset) % args.batch_size + 1}_chapters.pdf', save_all=True, append_images=pdf_pages)
 
+    json_file = json.dumps({
+        "last_chapter": last_chapter + 1,
+        "current_pdfs": current_pdfs,
+    }, indent=4)
+    with open(f"{folder_name}/info.json", "w") as outfile:
+        outfile.write(json_file)
+    print(f"Finished downloading {last_chapter - offset + 1} chapters!")
 
-# Modify these three variables to your liking
-delay_between_requests = 0  # Delay in seconds between each image download to avoid time out
 
 # These should not be modified
-pdf = None
 session = None
+args = None
 headers_list = [
     {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
@@ -35,6 +41,10 @@ headers_list = [
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.3"
     },
 ]
+default_json = {
+    "last_chapter": 0,
+    "current_pdfs": 0,
+}
 
 
 def download_chapters(base_url, manga_name):
@@ -42,14 +52,21 @@ def download_chapters(base_url, manga_name):
     pdf = None
     current_page = base_url
     pdf_pages = []
+    starting_chapter = 0
+    current_pdfs = 0
 
     # Creates the dir for the pdfs
     os.makedirs(manga_name, exist_ok=True)
     dir_path = f"{manga_name}/"
-    starting_chapter = 0
-    for path in os.listdir(dir_path):
-        if os.path.isfile(os.path.join(dir_path, path)):
-            starting_chapter += 1
+    if not os.path.isfile(f"{dir_path}info.json"):
+        json_file = json.dumps(default_json, indent=4)
+        with open(f"{dir_path}info.json", "w") as outfile:
+            outfile.write(json_file)
+    else:
+        with open(f"{dir_path}info.json", "r") as openfile:
+            json_data = json.load(openfile)
+            starting_chapter = json_data["last_chapter"]
+            current_pdfs = json_data["current_pdfs"]
     iteration = 0
 
     # Iterates through all the chapters until there are no more chapters
@@ -84,8 +101,9 @@ def download_chapters(base_url, manga_name):
 
                 # We remove the current image from the pc as it is already stocked in the memory and sleep if we need to
                 os.remove(file_name)
-                time.sleep(delay_between_requests)
-            pdf.save(f'{manga_name}/chapter_{iteration + 1}.pdf', save_all=True, append_images=pdf_pages)
+                time.sleep(args.delay_between_requests)
+            atexit.unregister(exit_handler)
+            atexit.register(exit_handler, titles[choice - 1], pdf, pdf_pages, starting_chapter, iteration, current_pdfs)
         else:
             print(f"Skipping chapter {iteration + 1}, it already exists!")
 
@@ -94,14 +112,16 @@ def download_chapters(base_url, manga_name):
         if next_chapter is not None:
             # If there is we go to the next page and create the pdf of the current one
             current_page = next_chapter['href']
-            pdf_pages = []
-            pdf = None
+
+            if iteration >= starting_chapter and (iteration - starting_chapter + 1) % args.batch_size == 0:
+                current_pdfs += 1
+                pdf.save(f'{manga_name}/Batch_{current_pdfs}-{args.batch_size}_chapters.pdf', save_all=True, append_images=pdf_pages)
+                pdf_pages = []
+                pdf = None
             iteration += 1
         else:
             # If not, then we end the program
             current_page = None
-
-    print(f"Finished creating {iteration - starting_chapter + 1} chapter pdfs!")
 
 
 if __name__ == '__main__':
@@ -110,11 +130,12 @@ if __name__ == '__main__':
                     description='Download pdf mangas from manganato.com',
                     epilog='Program made by PxGluz')
     parser.add_argument('-s', '-search-size', default=5, type=int, dest="search_size", help="how many results should be shown when searching")
+    parser.add_argument('-b', '-batch-size', default=1, type=int, dest="batch_size", help="how many chapters should be saved in each pdf")
+    parser.add_argument('-d', '-delay-between-requests', default=0, type=float, dest="delay_between_requests", help="delay between each of the made requests")
     args = parser.parse_args()
 
     session = requests.Session()
     const_link = "https://manganato.com/search/story/"
-    search_size = args.search_size
 
     while True:
         search_name = input("Please input the name of the manga you want downloaded: ").replace(' ', '_')
@@ -122,7 +143,7 @@ if __name__ == '__main__':
         search_soup = bs4.BeautifulSoup(html_page.text, 'html.parser')
         search_results = search_soup.find("div", {"class": "panel-search-story"})
         if search_results is not None:
-            elements = search_results.findChildren("a", {"class": "item-img bookmark_check"})[:search_size]
+            elements = search_results.findChildren("a", {"class": "item-img bookmark_check"})[:args.search_size]
             links = [x['href'] for x in elements]
             titles = [x['title'] for x in elements]
 
@@ -141,7 +162,6 @@ if __name__ == '__main__':
                         chapter_list = chapters_soup.find("ul", {"class": "row-content-chapter"})
                         if chapter_list is not None:
                             first_chapter_link = chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})[-1]["href"]
-                            atexit.register(exit_handler, titles[choice - 1])
                             download_chapters(first_chapter_link, titles[choice - 1])
                         else:
                             print("\nManga has no chapters... Returning to search")
