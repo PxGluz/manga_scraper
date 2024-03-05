@@ -47,27 +47,13 @@ default_json = {
 }
 
 
-def download_chapters(base_url, manga_name):
+def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
     # Inits
     pdf = None
     current_page = base_url
     pdf_pages = []
-    starting_chapter = 0
-    current_pdfs = 0
 
-    # Creates the dir for the pdfs
-    os.makedirs(manga_name, exist_ok=True)
-    dir_path = f"{manga_name}/"
-    if not os.path.isfile(f"{dir_path}info.json"):
-        json_file = json.dumps(default_json, indent=4)
-        with open(f"{dir_path}info.json", "w") as outfile:
-            outfile.write(json_file)
-    else:
-        with open(f"{dir_path}info.json", "r") as openfile:
-            json_data = json.load(openfile)
-            starting_chapter = json_data["last_chapter"]
-            current_pdfs = json_data["current_pdfs"]
-    iteration = 0
+    iteration = starting_chapter
 
     # Iterates through all the chapters until there are no more chapters
     while current_page is not None:
@@ -75,37 +61,34 @@ def download_chapters(base_url, manga_name):
         # Get html of current page
         soup = bs4.BeautifulSoup(html.text, 'html.parser')
 
-        if iteration >= starting_chapter:
-            # Getting the images here
-            reader_container = soup.find("div", {"class": "container-chapter-reader"})
-            image_links = [x['src'] for x in reader_container.findChildren("img")]
+        # Getting the images here
+        reader_container = soup.find("div", {"class": "container-chapter-reader"})
+        image_links = [x['src'] for x in reader_container.findChildren("img")]
 
-            # Here we iterate through all the images of the current chapter
-            for i in tqdm(range(len(image_links)), desc=f"Downloading chapter {iteration + 1}!"):
-                image_url = image_links[i]
-                file_name = f"{manga_name}/image_{i + 1}.jpg"
+        # Here we iterate through all the images of the current chapter
+        for i in tqdm(range(len(image_links)), desc=f"Downloading chapter {iteration + 1}"):
+            image_url = image_links[i]
+            file_name = f"{manga_name}/image_{i + 1}.jpg"
 
-                # We update the headers to create a reference to the current chapter page
-                headers = random.choice(headers_list)
-                headers["Referer"] = current_page
+            # We update the headers to create a reference to the current chapter page
+            headers = random.choice(headers_list)
+            headers["Referer"] = current_page
 
-                with session.get(image_url, headers=headers) as response:
-                    with open(file_name, "wb") as f:
-                        f.write(response.content)
+            with session.get(image_url, headers=headers) as response:
+                with open(file_name, "wb") as f:
+                    f.write(response.content)
 
-                # We add it to the current image list and initialize the first image if it is not already
-                if pdf is None:
-                    pdf = Image.open(file_name).convert('RGB')
-                else:
-                    pdf_pages.append(Image.open(file_name).convert('RGB'))
+            # We add it to the current image list and initialize the first image if it is not already
+            if pdf is None:
+                pdf = Image.open(file_name).convert('RGB')
+            else:
+                pdf_pages.append(Image.open(file_name).convert('RGB'))
 
-                # We remove the current image from the pc as it is already stocked in the memory and sleep if we need to
-                os.remove(file_name)
-                time.sleep(args.delay_between_requests)
-            atexit.unregister(exit_handler)
-            atexit.register(exit_handler, titles[choice - 1], pdf, pdf_pages, starting_chapter, iteration, current_pdfs)
-        else:
-            print(f"Skipping chapter {iteration + 1}, it already exists!")
+            # We remove the current image from the pc as it is already stocked in the memory and sleep if we need to
+            os.remove(file_name)
+            time.sleep(args.delay_between_requests)
+        atexit.unregister(exit_handler)
+        atexit.register(exit_handler, manga_name, pdf, pdf_pages, starting_chapter, iteration, current_pdfs)
 
         # We check if there is a next chapter
         next_chapter = soup.find("a", {"class": "navi-change-chapter-btn-next"})
@@ -113,7 +96,7 @@ def download_chapters(base_url, manga_name):
             # If there is we go to the next page and create the pdf of the current one
             current_page = next_chapter['href']
 
-            if iteration >= starting_chapter and (iteration - starting_chapter + 1) % args.batch_size == 0:
+            if (iteration - starting_chapter + 1) % args.batch_size == 0:
                 current_pdfs += 1
                 pdf.save(f'{manga_name}/Batch_{current_pdfs}-{args.batch_size}_chapters.pdf', save_all=True, append_images=pdf_pages)
                 pdf_pages = []
@@ -161,8 +144,29 @@ if __name__ == '__main__':
                         chapters_soup = bs4.BeautifulSoup(chapters_html.text, 'html.parser')
                         chapter_list = chapters_soup.find("ul", {"class": "row-content-chapter"})
                         if chapter_list is not None:
-                            first_chapter_link = chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})[-1]["href"]
-                            download_chapters(first_chapter_link, titles[choice - 1])
+                            starting_chapter = 0
+                            current_pdfs = 0
+
+                            # Creates the dir for the pdfs
+                            os.makedirs(titles[choice - 1], exist_ok=True)
+                            dir_path = f"{titles[choice - 1]}/"
+                            if not os.path.isfile(f"{dir_path}info.json"):
+                                json_file = json.dumps(default_json, indent=4)
+                                with open(f"{dir_path}info.json", "w") as outfile:
+                                    outfile.write(json_file)
+                            else:
+                                with open(f"{dir_path}info.json", "r") as openfile:
+                                    json_data = json.load(openfile)
+                                    starting_chapter = json_data["last_chapter"]
+                                    current_pdfs = json_data["current_pdfs"]
+                                    print(f"Skipping to chapter: {starting_chapter + 1}")
+                            chapter_children = chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})
+                            if starting_chapter >= len(chapter_children):
+                                print("\nNo new chapters... Returning to search")
+                                choice = 0
+                            else:
+                                starting_chapter_link = chapter_children[-(starting_chapter + 1)]["href"]
+                                download_chapters(starting_chapter_link, titles[choice - 1], starting_chapter, current_pdfs)
                         else:
                             print("\nManga has no chapters... Returning to search")
                             choice = 0
