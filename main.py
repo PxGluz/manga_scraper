@@ -16,7 +16,10 @@ def exit_handler(folder_name, pdf_var, pdf_pages, offset, last_chapter, current_
         if item.endswith(".jpg"):
             os.remove(os.path.join(folder_name, item))
     current_pdfs += 1
-    pdf_var.save(f'{folder_name}/Batch_{current_pdfs}-{(last_chapter - offset) % args.batch_size + 1}_chapters.pdf', save_all=True, append_images=pdf_pages)
+    if args.batch_size != -1:
+        pdf_var.save(f'{folder_name}/{folder_name}_Batch_{current_pdfs}-{(last_chapter - offset) % args.batch_size + 1}_chapters.pdf', save_all=True, append_images=pdf_pages)
+    else:
+        pdf_var.save(f'{folder_name}/{folder_name}-{last_chapter}_chapters.pdf', save_all=True, append_images=pdf_pages)
 
     json_file = json.dumps({
         "last_chapter": last_chapter + 1,
@@ -96,7 +99,7 @@ def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
             # If there is we go to the next page and create the pdf of the current one
             current_page = next_chapter['href']
 
-            if (iteration - starting_chapter + 1) % args.batch_size == 0:
+            if args.batch_size != -1 and (iteration - starting_chapter + 1) % args.batch_size == 0:
                 current_pdfs += 1
                 pdf.save(f'{manga_name}/Batch_{current_pdfs}-{args.batch_size}_chapters.pdf', save_all=True, append_images=pdf_pages)
                 pdf_pages = []
@@ -113,7 +116,7 @@ if __name__ == '__main__':
                     description='Download pdf mangas from manganato.com',
                     epilog='Program made by PxGluz')
     parser.add_argument('-s', '-search-size', default=5, type=int, dest="search_size", help="how many results should be shown when searching")
-    parser.add_argument('-b', '-batch-size', default=1, type=int, dest="batch_size", help="how many chapters should be saved in each pdf")
+    parser.add_argument('-b', '-batch-size', default=-1, type=int, dest="batch_size", help="how many chapters should be saved in each pdf, leave blank for a single pdf with all chapters")
     parser.add_argument('-d', '-delay-between-requests', default=0, type=float, dest="delay_between_requests", help="delay between each of the made requests")
     args = parser.parse_args()
 
