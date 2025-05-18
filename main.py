@@ -50,7 +50,7 @@ default_json = {
 }
 
 
-def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
+def download_chapters(base_url, manga_name, starting_chapter, current_pdfs, manga_page_url, headers):
     # Inits
     pdf = None
     current_page = base_url
@@ -60,7 +60,10 @@ def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
 
     # Iterates through all the chapters until there are no more chapters
     while current_page is not None:
-        html = session.get(current_page, headers=random.choice(headers_list), allow_redirects=False)
+        headers["Referer"] = manga_page_url
+        html = session.get(current_page, headers=headers, allow_redirects=False)
+        time.sleep(args.delay_between_requests)
+        
         # Get html of current page
         soup = bs4.BeautifulSoup(html.text, 'html.parser')
 
@@ -71,15 +74,26 @@ def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
         # Here we iterate through all the images of the current chapter
         for i in tqdm(range(len(image_links)), desc=f"Downloading chapter {iteration + 1}"):
             image_url = image_links[i]
-            file_name = f"{manga_name}/image_{i + 1}.jpg"
 
             # We update the headers to create a reference to the current chapter page
-            headers = random.choice(headers_list)
+            headers = headers
             headers["Referer"] = current_page
 
+            file_name = "image.webp"
+
+            # Download the image
             with session.get(image_url, headers=headers) as response:
+                time.sleep(args.delay_between_requests)
                 with open(file_name, "wb") as f:
                     f.write(response.content)
+
+            with Image.open(file_name) as img:
+                # Convert the image to RGB mode (if necessary)
+                img = img.convert('RGB')
+
+                # Save the image in JPEG format
+                jpeg_file_name = f"{manga_name}/image_{i + 1}.jpg"
+                img.save(jpeg_file_name, "JPEG")
 
             # We add it to the current image list and initialize the first image if it is not already
             if pdf is None:
@@ -94,7 +108,7 @@ def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
         atexit.register(exit_handler, manga_name, pdf, pdf_pages, starting_chapter, iteration, current_pdfs)
 
         # We check if there is a next chapter
-        next_chapter = soup.find("a", {"class": "navi-change-chapter-btn-next"})
+        next_chapter = soup.find("div", {"class": "btn-navigation-chap"}).find("a")
         if next_chapter is not None:
             # If there is we go to the next page and create the pdf of the current one
             current_page = next_chapter['href']
@@ -113,7 +127,7 @@ def download_chapters(base_url, manga_name, starting_chapter, current_pdfs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
                     prog='MangaScraper',
-                    description='Download pdf mangas from manganato.com',
+                    description='Download pdf mangas from natomanga.com',
                     epilog='Program made by PxGluz')
     parser.add_argument('-s', '-search-size', default=5, type=int, dest="search_size", help="how many results should be shown when searching")
     parser.add_argument('-b', '-batch-size', default=-1, type=int, dest="batch_size", help="how many chapters should be saved in each pdf, leave blank for a single pdf with all chapters")
@@ -121,17 +135,24 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     session = requests.Session()
-    const_link = "https://manganato.com/search/story/"
+    const_link = "https://www.natomanga.com/search/story/"
+
+
+        
 
     while True:
         search_name = input("Please input the name of the manga you want downloaded: ").replace(' ', '_')
-        html_page = session.get(const_link + search_name.lower(), headers=random.choice(headers_list), allow_redirects=False)
+        headers = random.choice(headers_list)
+        headers["Referer"] = "https://www.natomanga.com"
+
+        html_page = session.get(const_link + search_name.lower(), headers=headers, allow_redirects=True)
+        time.sleep(args.delay_between_requests)
         search_soup = bs4.BeautifulSoup(html_page.text, 'html.parser')
-        search_results = search_soup.find("div", {"class": "panel-search-story"})
+        search_results = search_soup.find("div", {"class": "panel_story_list"})
         if search_results is not None:
-            elements = search_results.findChildren("a", {"class": "item-img bookmark_check"})[:args.search_size]
+            elements = [element.find("a") for element in search_results.findChildren("h3", {"class": "story_name"})[:args.search_size]]
             links = [x['href'] for x in elements]
-            titles = [x['title'] for x in elements]
+            titles = [x.text for x in elements]
 
             while True:
                 print("\n0. Return to searching\n")
@@ -142,10 +163,11 @@ if __name__ == '__main__':
                     print("\nInvalid input!\n")
                 else:
                     if choice != 0:
-                        chapters_html = session.get(links[choice - 1], headers=random.choice(headers_list),
+                        chapters_html = session.get(links[choice - 1], headers=headers,
                                                     allow_redirects=False)
+                        time.sleep(args.delay_between_requests)
                         chapters_soup = bs4.BeautifulSoup(chapters_html.text, 'html.parser')
-                        chapter_list = chapters_soup.find("ul", {"class": "row-content-chapter"})
+                        chapter_list = chapters_soup.find("div", {"class": "chapter-list"})
                         if chapter_list is not None:
                             starting_chapter = 0
                             current_pdfs = 0
@@ -163,13 +185,13 @@ if __name__ == '__main__':
                                     starting_chapter = json_data["last_chapter"]
                                     current_pdfs = json_data["current_pdfs"]
                                     print(f"Skipping to chapter: {starting_chapter + 1}")
-                            chapter_children = chapter_list.findChildren("a", {"class": "chapter-name text-nowrap"})
+                            chapter_children = chapter_list.findChildren("a")
                             if starting_chapter >= len(chapter_children):
                                 print("\nNo new chapters... Returning to search")
                                 choice = 0
                             else:
                                 starting_chapter_link = chapter_children[-(starting_chapter + 1)]["href"]
-                                download_chapters(starting_chapter_link, titles[choice - 1], starting_chapter, current_pdfs)
+                                download_chapters(starting_chapter_link, titles[choice - 1], starting_chapter, current_pdfs, links[choice - 1], headers)
                         else:
                             print("\nManga has no chapters... Returning to search")
                             choice = 0
